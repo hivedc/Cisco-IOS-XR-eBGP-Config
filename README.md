@@ -11,4 +11,4 @@ Hopefully this will save you some time if you've never done BGP on Cisco IOS XR,
 
 ## Key takeaways
 - no peer ASN name, only the ASN # (M&As happen all the time, ASNs change less often)
-- WAN side prefix sets are not scalable. We only use prefix sets on the customer side and do the rest with BGP communities
+- WAN side prefix sets are not scalable. We only use prefix sets on the customer side and do the rest with BGP communities. By filtering then adding the proper communities, we only have to do the changes in one place when a cust adds a prefix, unline our previous setup where we had to edit many prefix filters.
