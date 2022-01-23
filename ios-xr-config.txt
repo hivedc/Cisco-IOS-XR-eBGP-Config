@@ -1,0 +1,477 @@
+#ipv4 bogons
+prefix-set bogons-v4
+  0.0.0.0/8 le 32,
+  10.0.0.0/8 le 32,
+  100.64.0.0/10 le 32,
+  127.0.0.0/8 le 32,
+  169.254.0.0/16 le 32,
+  172.16.0.0/12 le 32,
+  192.0.2.0/24 le 32,
+  192.88.99.0/24 le 32,
+  192.168.0.0/16 le 32,
+  198.18.0.0/15 le 32,
+  198.51.100.0/24 le 32,
+  203.0.113.0/24 le 32,
+  224.0.0.0/4 le 32,
+  240.0.0.0/4 le 32
+end-set
+!
+
+#ipv6 bogons
+prefix-set bogons-v6
+  3ffe::/16 le 128,
+  2001:db8::/32 le 128,
+  2001::/32,
+  2001::/32 le 128,
+  2002::/16,
+  2002::/16 le 128,
+  fe00::/9 le 128,
+  ff00::/8 le 128
+end-set
+
+#list of local v4 networks
+prefix-set as33185-v4
+  170.39.196.0/22 le 24,
+  104.167.216.0/22 le 24,
+  45.45.160.0/22 le 24,
+  66.187.192.0/22 le 24
+end-set
+!
+#list of local v6 networks
+prefix-set as33185-v6
+  2602:fd23::/36 le 48
+end-set
+
+prefix-set default-v4
+  0.0.0.0/0
+end-set
+
+#list of all peering communities
+community-set peerings
+  33185:200,
+  33185:20028,
+  33185:20039,
+  33185:400,
+  33185:40028
+end-set
+
+#list of cust & local communities
+community-set hive-and-custs
+  33185:2100,
+  33185:3100
+end-set
+
+community-set as33185-wildcard
+  33185:*
+end-set
+
+
+#policy for IX outbound
+route-policy ix-out-v4
+#if prefix has a peering or transit community, do not send it back to WAN
+  if community matches-any do-not-send-to-wan then
+    drop
+  else
+    pass
+  endif
+ #drop bogons
+  apply block-bogons-v4
+ #make sure we don't send any prefixes smaller than /24 on DFZ
+  apply dfz-min-size-v4
+ #if the prefix is our own, done
+  if destination in as33185-v4 then
+    done
+  else
+    pass
+  endif
+ #if prefix is from cust, done
+  if community matches-any hive-and-custs then
+    done
+  else
+    pass
+  endif
+  drop
+end-policy
+
+route-policy ix-out-v6
+#if prefix has a peering or transit community, do not send it back to WAN
+  if community matches-any do-not-send-to-wan then
+    drop
+  else
+    pass
+  endif
+#drop bogons
+  apply block-bogons-v6
+#dont send prefixes smaller than /48 to WAN
+  apply dfz-min-size-v6
+#if prefix is our own, done
+  if destination in as33185-v6 then
+    done
+  else
+    pass
+  endif
+#if prefix is from cust, done
+  if community matches-any hive-and-custs then
+    done
+  else
+    pass
+  endif
+  drop
+end-policy
+
+route-policy block-bogons-v4
+  if destination in bogons-v4 then
+    drop
+  else
+    pass
+  endif
+end-policy
+!
+route-policy block-bogons-v6
+  if destination in bogons-v6 then
+    drop
+  else
+    pass
+  endif
+end-policy
+!
+route-policy dfz-min-size-v4
+  if destination in dfz-min-size-v4 then
+    pass
+  else
+    drop
+  endif
+end-policy
+!
+route-policy dfz-min-size-v6
+  if destination in dfz-min-size-v6 then
+    pass
+  else
+    drop
+  endif
+end-policy
+
+route-policy drop-as33185-v4
+  if destination in as33185-v4 then
+    drop
+  else
+    pass
+  endif
+end-policy
+!
+route-policy drop-as33185-v6
+  if destination in as33185-v6 then
+    drop
+  else
+    pass
+  endif
+end-policy
+!
+route-policy cust-full-out-v4
+  apply block-bogons-v4
+  apply dfz-min-size-v4
+  done
+end-policy
+!
+route-policy cust-full-out-v6
+  apply block-bogons-v6
+  apply dfz-min-size-v6
+  done
+end-policy
+!
+route-policy pni-2800tc-v4-in
+  apply dfz-min-size-v4
+  apply block-bogons-v4
+  apply drop-as33185-v4
+  apply drop-rpki-invalid
+  set local-preference 175
+  set community (33185:400) additive
+  set community (33185:40028) additive
+end-policy
+!
+route-policy pni-2800tc-v6-in
+  apply dfz-min-size-v6
+  apply block-bogons-v6
+  apply drop-as33185-v6
+  apply drop-rpki-invalid
+  set local-preference 175
+  set community (33185:400) additive
+  set community (33185:40028) additive
+end-policy
+!
+route-policy drop-rpki-invalid
+  if validation-state is invalid then
+    drop
+  endif
+end-policy
+!
+route-policy ix-rs-2800tc-v4-in
+  apply dfz-min-size-v4
+  apply block-bogons-v4
+  apply drop-as33185-v4
+  apply drop-rpki-invalid
+  apply clean-wan-community-in
+  set local-preference 125
+  set community (33185:200) additive
+  set community (33185:20028) additive
+end-policy
+!
+route-policy ix-rs-2800tc-v6-in
+  apply dfz-min-size-v6
+  apply block-bogons-v6
+  apply drop-as33185-v6
+  apply drop-rpki-invalid
+  apply clean-wan-community-in
+  set local-preference 125
+  set community (33185:200) additive
+  set community (33185:20028) additive
+end-policy
+!
+route-policy cust-default-out-v4
+  if destination in default-only-v4 then
+    done
+  else
+    drop
+  endif
+end-policy
+!
+route-policy cust-default-out-v6
+  if destination in default-only-v6 then
+    done
+  else
+    drop
+  endif
+end-policy
+!
+route-policy transit-2800tc-v4-in
+  apply dfz-min-size-v4
+  apply block-bogons-v4
+  apply drop-as33185-v4
+  apply drop-rpki-invalid
+  apply clean-wan-community-in
+  set local-preference 100
+  set community (33185:100) additive
+  set community (33185:10028) additive
+end-policy
+!
+route-policy transit-2800tc-v6-in
+  apply dfz-min-size-v6
+  apply block-bogons-v6
+  apply drop-as33185-v6
+  apply drop-rpki-invalid
+  apply clean-wan-community-in
+  set local-preference 100
+  set community (33185:100) additive
+  set community (33185:10028) additive
+end-policy
+!
+route-policy apply-to-all-custs-v4
+#any cust should not send smaller than /24
+  apply dfz-min-size-v4
+#remove all communities sent by cust
+  apply clean-cust-community-in
+#set generic cust community
+  set community (33185:2100) additive
+#set specific cust community
+  set community (33185:21028) additive
+#increase local pref
+  set local-preference 175
+end-policy
+!
+route-policy apply-to-all-custs-v6
+#any cust should not send smaller than /48
+  apply dfz-min-size-v6
+#remove all communities sent by cust
+  apply clean-cust-community-in
+#drop any rpki invalid sent by cust
+  apply drop-rpki-invalid
+#set generic cust community
+  set community (33185:2100) additive
+#set specific cust community
+  set community (33185:21028) additive
+#increase local pref
+  set local-preference 175
+end-policy
+!
+route-policy as6461-transit-v4-out
+#if prefix has a peering or transit community, dont send it back to WAN
+  if community matches-any do-not-send-to-wan then
+    drop
+  else
+    pass
+  endif
+#if prefix is from RTBH, let it go trough right away
+  if community matches-any rtbh then
+    done
+  else
+    pass
+  endif
+#dont send bogons to WAN
+  apply block-bogons-v4
+#dont send smaller than /24 to WAN
+  apply dfz-min-size-v4
+#if prefix is our own, prepend once it and send it
+  if destination in as33185-v4 then
+    prepend as-path 33185 1
+    done
+  else
+    pass
+  endif
+#if prefix is from cust, prepend it once and send it
+  if community matches-any hive-and-custs then
+    prepend as-path 33185 1
+    done
+  else
+    pass
+  endif
+  drop
+end-policy
+!
+route-policy as6461-transit-v6-out
+  if community matches-any do-not-send-to-wan then
+    drop
+  else
+    pass
+  endif
+  apply block-bogons-v6
+  if community matches-any rtbh then
+    done
+  else
+    pass
+  endif
+  apply dfz-min-size-v6
+  if destination in as33185-v6 then
+    prepend as-path 33185
+    done
+  else
+    pass
+  endif
+  if community matches-any hive-and-custs then
+    prepend as-path 33185
+    done
+  else
+    pass
+  endif
+  drop
+end-policy
+!
+route-policy clean-wan-community-in
+  if community matches-within as33185-wildcard then
+    delete community all
+  else
+    pass
+  endif
+end-policy
+!
+
+#only send hive and cust routes to cust
+route-policy cust-hive-custs-out-v4
+  apply dfz-min-size-v4
+  apply block-bogons-v4
+  if community matches-any hive-and-custs then
+    done
+  else
+    pass
+  endif
+  if destination in as33185-v4 then
+    done
+  else
+    pass
+  endif
+  drop
+end-policy
+!
+#only send hive and cust routes to cust
+route-policy cust-hive-custs-out-v6
+  apply dfz-min-size-v6
+  apply block-bogons-v6
+  if community matches-any hive-and-custs then
+    done
+  else
+    pass
+  endif
+  if destination in as33185-v6 then
+    done
+  else
+    pass
+  endif
+  drop
+end-policy
+!
+#policy for bilateral peering
+route-policy ix-direct-2800tc-v4-in
+  apply dfz-min-size-v4
+  apply block-bogons-v4
+  apply drop-as33185-v4
+  apply drop-rpki-invalid
+  apply clean-wan-community-in
+  set local-preference 150
+  set community (33185:200) additive
+  set community (33185:20028) additive
+end-policy
+!
+#policy for bilateral peering
+route-policy ix-direct-2800tc-v6-in
+  apply dfz-min-size-v6
+  apply block-bogons-v6
+  apply drop-as33185-v6
+  apply drop-rpki-invalid
+  apply clean-wan-community-in
+  set local-preference 150
+  set community (33185:200) additive
+  set community (33185:20028) additive
+end-policy
+!
+route-policy clean-cust-community-in
+  if community matches-within cust-controlled-communities then
+    pass
+  else
+    delete community all
+  endif
+end-policy
+!
+
+#send hive, cust and peering routes to cust
+route-policy cust-hive-custs-peerings-out-v4
+  apply dfz-min-size-v4
+  apply block-bogons-v4
+  if community matches-any hive-and-custs then
+    done
+  else
+    pass
+  endif
+  if destination in as33185-v4 then
+    done
+  else
+    pass
+  endif
+  if community matches-any peerings then
+    done
+  else
+    pass
+  endif
+  drop
+end-policy
+!
+route-policy cust-hive-custs-peerings-out-v6
+  apply dfz-min-size-v6
+  apply block-bogons-v6
+  if community matches-any hive-and-custs then
+    done
+  else
+    pass
+  endif
+  if destination in as33185-v6 then
+    done
+  else
+    pass
+  endif
+  if community matches-any peerings then
+    done
+  else
+    pass
+  endif
+  drop
+end-policy
+
+
